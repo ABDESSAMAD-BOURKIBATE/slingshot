@@ -9,10 +9,13 @@ import { StrategicHint, AiResponse, DebugInfo, TargetCandidate, DifficultyLevel 
 // Initialize Gemini Client
 let ai: GoogleGenAI | null = null;
 
-if (process.env.API_KEY) {
-    ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+// Access API key using Vite's import.meta.env
+const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
+
+if (apiKey) {
+  ai = new GoogleGenAI({ apiKey });
 } else {
-    console.error("API_KEY is missing from environment variables.");
+  console.error("VITE_GEMINI_API_KEY is missing from environment variables.");
 }
 
 const MODEL_NAME = "gemini-3-flash-preview";
@@ -27,7 +30,7 @@ export const getStrategicHint = async (
   language: 'en' | 'ar' = 'en'
 ): Promise<AiResponse> => {
   const startTime = performance.now();
-  
+
   // Default debug info container
   const debug: DebugInfo = {
     latency: 0,
@@ -39,40 +42,40 @@ export const getStrategicHint = async (
 
   if (!ai) {
     return {
-        hint: { message: "API Key missing." },
-        debug: { ...debug, error: "API Key Missing" }
+      hint: { message: "API Key missing." },
+      debug: { ...debug, error: "API Key Missing" }
     };
   }
 
   // Local Heuristic Fallback
   const getBestLocalTarget = (msg: string = "No clear shots—play defensively."): StrategicHint => {
     if (validTargets.length > 0) {
-        // Sort by Total Potential Score (Size * Value) then Height
-        const best = validTargets.sort((a,b) => {
-            const scoreA = a.size * a.pointsPerBubble;
-            const scoreB = b.size * b.pointsPerBubble;
-            return (scoreB - scoreA) || (a.row - b.row);
-        })[0];
-        
-        return {
-            message: `Fallback: Select ${best.color.toUpperCase()} at Row ${best.row}`,
-            rationale: "Selected based on highest potential cluster score available locally.",
-            targetRow: best.row,
-            targetCol: best.col,
-            recommendedColor: best.color as any
-        };
+      // Sort by Total Potential Score (Size * Value) then Height
+      const best = validTargets.sort((a, b) => {
+        const scoreA = a.size * a.pointsPerBubble;
+        const scoreB = b.size * b.pointsPerBubble;
+        return (scoreB - scoreA) || (a.row - b.row);
+      })[0];
+
+      return {
+        message: `Fallback: Select ${best.color.toUpperCase()} at Row ${best.row}`,
+        rationale: "Selected based on highest potential cluster score available locally.",
+        targetRow: best.row,
+        targetCol: best.col,
+        recommendedColor: best.color as any
+      };
     }
     return { message: msg, rationale: "No valid clusters found to target." };
   };
 
   const hasDirectTargets = validTargets.length > 0;
 
-  const targetListStr = hasDirectTargets 
-    ? validTargets.map(t => 
-        `- OPTION: Select ${t.color.toUpperCase()} (${t.pointsPerBubble} pts/bubble) -> Target [Row ${t.row}, Col ${t.col}]. Cluster Size: ${t.size}. Total Value: ${t.size * t.pointsPerBubble}.`
-      ).join("\n")
+  const targetListStr = hasDirectTargets
+    ? validTargets.map(t =>
+      `- OPTION: Select ${t.color.toUpperCase()} (${t.pointsPerBubble} pts/bubble) -> Target [Row ${t.row}, Col ${t.col}]. Cluster Size: ${t.size}. Total Value: ${t.size * t.pointsPerBubble}.`
+    ).join("\n")
     : "NO MATCHES AVAILABLE. Suggest a color to set up a future combo.";
-  
+
   let difficultyContext = "";
   if (difficulty === 'easy') {
     difficultyContext = "Mode: EASY. The board is sparse. Suggest simple, confidence-building shots.";
@@ -146,75 +149,75 @@ export const getStrategicHint = async (
       model: MODEL_NAME,
       contents: {
         parts: [
-            { text: prompt },
-            { 
-              inlineData: {
-                mimeType: "image/png",
-                data: cleanBase64
-              } 
+          { text: prompt },
+          {
+            inlineData: {
+              mimeType: "image/png",
+              data: cleanBase64
             }
+          }
         ]
       },
       config: {
         maxOutputTokens: 4096, // Increased to prevent JSON truncation
         temperature: 0.4,
-        responseMimeType: "application/json" 
+        responseMimeType: "application/json"
       }
     });
 
     const endTime = performance.now();
     debug.latency = Math.round(endTime - startTime);
-    
+
     let text = response.text || "{}";
     debug.rawResponse = text;
-    
+
     // Robust JSON Extraction: 
     // Isolate the substring between the first '{' and the last '}'
     const firstBrace = text.indexOf('{');
     const lastBrace = text.lastIndexOf('}');
 
     if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
-        text = text.substring(firstBrace, lastBrace + 1);
-    } 
+      text = text.substring(firstBrace, lastBrace + 1);
+    }
 
     try {
-        const json = JSON.parse(text);
-        debug.parsedResponse = json;
-        
-        const r = Number(json.targetRow);
-        const c = Number(json.targetCol);
-        
-        if (!isNaN(r) && !isNaN(c) && json.recommendedColor) {
-            return {
-                hint: {
-                    message: json.message || "Good shot available!",
-                    rationale: json.rationale,
-                    targetRow: r,
-                    targetCol: c,
-                    recommendedColor: json.recommendedColor.toLowerCase()
-                },
-                debug
-            };
-        }
+      const json = JSON.parse(text);
+      debug.parsedResponse = json;
+
+      const r = Number(json.targetRow);
+      const c = Number(json.targetCol);
+
+      if (!isNaN(r) && !isNaN(c) && json.recommendedColor) {
         return {
-            hint: getBestLocalTarget("System returned invalid coordinates"),
-            debug: { ...debug, error: "Invalid Coordinates in JSON" }
+          hint: {
+            message: json.message || "Good shot available!",
+            rationale: json.rationale,
+            targetRow: r,
+            targetCol: c,
+            recommendedColor: json.recommendedColor.toLowerCase()
+          },
+          debug
         };
+      }
+      return {
+        hint: getBestLocalTarget("System returned invalid coordinates"),
+        debug: { ...debug, error: "Invalid Coordinates in JSON" }
+      };
 
     } catch (e: any) {
-        console.warn("Failed to parse Gemini JSON:", text);
-        return {
-            hint: getBestLocalTarget("System response parse error"),
-            debug: { ...debug, error: `JSON Parse Error: ${e.message}` }
-        };
+      console.warn("Failed to parse Gemini JSON:", text);
+      return {
+        hint: getBestLocalTarget("System response parse error"),
+        debug: { ...debug, error: `JSON Parse Error: ${e.message}` }
+      };
     }
   } catch (error: any) {
     console.error("Gemini API Error:", error);
     const endTime = performance.now();
     debug.latency = Math.round(endTime - startTime);
     return {
-        hint: getBestLocalTarget("Service Unreachable"),
-        debug: { ...debug, error: error.message || "Unknown API Error" }
+      hint: getBestLocalTarget("Service Unreachable"),
+      debug: { ...debug, error: error.message || "Unknown API Error" }
     };
   }
 };
