@@ -1,0 +1,7 @@
+{
+  "name": "Gemini Slingshot",
+  "description": "A strategic bubble shooter analyzing the board and suggesting the best shots using your webcam.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
